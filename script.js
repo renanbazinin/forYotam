@@ -15,13 +15,13 @@ const ctx = canvas.getContext('2d');
 let faceMesh = null;
 let camera = null;
 
-// Face Detection / Capturing
-let faceDetected = false;
+// Face detection & capturing flow
+let faceDetected = false;    // True once a face is detected
 let countdownStarted = false;
-let faceCaptured = false;        // Once we've captured photos, we won't do it again
-let snapshots = [];
+let faceCaptured = false;    // True after we capture a set of snapshots
+let snapshots = [];          // Stores the current set of captured frames
 
-// UI overlay text
+// Overlay text displayed on the canvas
 let overlayText = 'No face detected';
 
 /*****************************************************
@@ -42,34 +42,34 @@ function initFaceMesh() {
     minTrackingConfidence: 0.5
   });
 
-  // onResults is called each time FaceMesh finishes processing a frame
+  // Handle results for every processed frame
   faceMesh.onResults(onResults);
 }
 
 /*****************************************************
- * 2. onResults - Called when FaceMesh processes a frame
+ * 2. onResults - Called each time FaceMesh processes a frame
  *****************************************************/
 function onResults(results) {
-  // Clear the canvas
+  // Draw the live video onto our canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Draw the video frame onto the canvas
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // Check if we found any face(s)
   const faceCount = results.multiFaceLandmarks.length;
 
-  // If no face is found...
+  // If no face found...
   if (faceCount === 0) {
+    // Only show "No face detected" if we haven't started countdown or finished capturing
     if (!countdownStarted && !faceCaptured) {
       faceDetected = false;
       overlayText = 'No face detected';
     }
   } 
-  // If a face is found, trigger countdown if not already started
+  // If a face is found...
   else {
+    // If we haven't detected a face yet and haven't started or finished capturing:
     if (!faceDetected && !countdownStarted && !faceCaptured) {
       faceDetected = true;
+      console.log('Face detected!');
       startCountdown();
     }
   }
@@ -79,19 +79,21 @@ function onResults(results) {
 }
 
 /*****************************************************
- * 3. Start the Camera via Mediapipe
+ * 3. Start the Camera using the Mediapipe Camera utility
  *****************************************************/
 function startCamera() {
+  // Reset our state each time we start
   faceDetected = false;
   countdownStarted = false;
   faceCaptured = false;
   snapshots = [];
   overlayText = 'No face detected';
+
   gifResult.innerHTML = '';
 
-  // Initialize Mediapipe camera
   camera = new Camera(video, {
     onFrame: async () => {
+      // Process each frame through FaceMesh
       await faceMesh.send({ image: video });
     },
     width: 640,
@@ -102,11 +104,10 @@ function startCamera() {
 }
 
 /*****************************************************
- * 4. Start the "2, 1, Go!" Countdown
+ * 4. Start the Countdown: "2", "1", "Go!"
  *****************************************************/
 function startCountdown() {
   countdownStarted = true;
-  // We'll cycle through messages ["2", "1", "Go!"]
   const countdownMessages = ['2', '1', 'Go!'];
   let index = 0;
 
@@ -120,12 +121,12 @@ function startCountdown() {
       overlayText = countdownMessages[index];
       console.log(`Countdown: ${overlayText}`);
     } else {
-      // Countdown finished, capture photos
+      // Done counting, clear text & capture photos
       clearInterval(countdownInterval);
-      overlayText = ''; // Clear the text (or leave "Go!" while capturing)
+      overlayText = ''; 
       capturePhotos();
     }
-  }, 1000); // 1 second per step
+  }, 1000);
 }
 
 /*****************************************************
@@ -134,8 +135,10 @@ function startCountdown() {
 function capturePhotos() {
   let shotsTaken = 0;
   const totalShots = 3;
+  snapshots = []; // Clear any old snapshots
+
   const shotInterval = setInterval(() => {
-    // Draw the current video frame onto the canvas
+    // Draw current video frame onto canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     // Convert canvas to base64
@@ -147,38 +150,66 @@ function capturePhotos() {
 
     if (shotsTaken === totalShots) {
       clearInterval(shotInterval);
-      faceCaptured = true; // Mark that we've done the capturing
-      displayGifLikeAnimation();
+      faceCaptured = true;
+      // Display "gif-like" frames
+      displayGifLikeAnimation(snapshots);
     }
   }, 500);
 }
 
 /*****************************************************
  * 6. Display "GIF-like" Animation
+ *    We'll create a new container each time 
+ *    so multiple results accumulate below.
  *****************************************************/
-function displayGifLikeAnimation() {
-  if (snapshots.length < 3) {
-    gifResult.textContent = 'Not enough frames.';
+function displayGifLikeAnimation(frames) {
+  if (frames.length < 3) {
+    overlayText = 'Not enough frames.';
     return;
   }
 
-  // Create an <img> to cycle through the snapshots
+  // Create a container for this "GIF" item
+  const gifItem = document.createElement('div');
+  gifItem.className = 'gif-item';
+
+  // Create <img> that we'll flip among frames
   const animationImg = document.createElement('img');
   animationImg.width = 320;
   animationImg.height = 240;
-  gifResult.appendChild(animationImg);
 
+  gifItem.appendChild(animationImg);
+  gifResult.appendChild(gifItem);
+
+  // Animate frame flipping
   let index = 0;
   setInterval(() => {
-    animationImg.src = snapshots[index];
-    index = (index + 1) % snapshots.length;
-  }, 200); // flip frames every 0.2s
+    animationImg.src = frames[index];
+    index = (index + 1) % frames.length;
+  }, 200);
+
+  // After we've displayed the new GIF,
+  // show "Looking for face..." for 1 second,
+  // then let detection run again.
+  setTimeout(() => {
+    overlayText = 'Looking for face...';
+    drawOverlayText(overlayText);
+    
+    setTimeout(() => {
+      overlayText = '';
+      // Reset states so we can detect a new face.
+      faceDetected = false;
+      countdownStarted = false;
+      faceCaptured = false;
+      snapshots = [];
+    }, 1000);
+  }, 0);
 }
 
 /*****************************************************
- * 7. Draw Overlay Text on Canvas
+ * 7. Utility: Draw Overlay Text on Canvas
  *****************************************************/
 function drawOverlayText(text) {
+  if (!text) return;
   ctx.save();
   ctx.font = '40px Arial';
   ctx.fillStyle = 'red';
@@ -192,5 +223,8 @@ function drawOverlayText(text) {
  *****************************************************/
 window.addEventListener('DOMContentLoaded', () => {
   initFaceMesh();
-  startBtn.addEventListener('click', startCamera);
+
+  startBtn.addEventListener('click', () => {
+    startCamera();
+  });
 });
